@@ -8,6 +8,9 @@ from distribuidora.models.distribuidora_models import EncomendaRequest, Encomend
 from shared.database import Encomenda, Cliente, Motorista, Veiculo
 from shared.dependencies import get_db
 import logging
+from shared.database import SessionLocal
+
+
 
 router = APIRouter()
 tz_brasilia = timezone(timedelta(hours=-3))
@@ -183,3 +186,23 @@ def listar_motoristas(db: Session = Depends(get_db)):
 def listar_veiculos(db: Session = Depends(get_db)):
     veiculos = db.query(Veiculo).all()
     return veiculos
+
+def atualizar_status_encomendas():
+
+
+    try:
+        db = SessionLocal()
+        agora = datetime.now(timezone.utc)
+        encomendas = db.query(Encomenda).filter(Encomenda.prazo_entrega < agora,
+                                                Encomenda.status_encomenda == True).all()
+        for encomenda in encomendas:
+            encomenda.status_encomenda = False
+        db.commit()
+    except Exception as e:
+        print(f"Erro ao atualizar status das encomendas: {e}")
+    finally:
+        db.close()
+
+
+
+
