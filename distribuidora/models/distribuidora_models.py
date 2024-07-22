@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 from distribuidora.models.veiculo_models import VeiculoRequest, VeiculoResponse
+from distribuidora.models.fornecedor_models import FornecedorRequest, FornecedorResponse
 
 class EncomendaRequest(BaseModel):
     cliente: str
@@ -19,6 +20,7 @@ class EncomendaResponse(BaseModel):
     status_encomenda: bool
     motorista_id: int
     veiculo_id: int
+    fornecedor: Optional[FornecedorResponse] = None
 
     class Config:
         orm_mode = True
@@ -67,5 +69,6 @@ class MotoristaResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
 
 

@@ -5,10 +5,12 @@ from sqlalchemy.orm import Session
 
 from distribuidora.models.distribuidora_models import EncomendaRequest, EncomendaResponse, ClienteRequest, \
     ClienteResponse, MotoristaRequest, MotoristaResponse, VeiculoRequest, VeiculoResponse
-from shared.database import Encomenda, Cliente, Motorista, Veiculo
+from shared.database import Encomenda, Cliente, Motorista, Veiculo, Fornecedor
 from shared.dependencies import get_db
 import logging
 from shared.database import SessionLocal
+from distribuidora.models.fornecedor_models import FornecedorRequest, FornecedorResponse
+
 
 
 
@@ -203,6 +205,35 @@ def atualizar_status_encomendas():
     finally:
         db.close()
 
+@router.post("/criar-fornecedor", response_model=FornecedorResponse)
+def criar_fornecedor(fornecedor: FornecedorRequest, db: Session = Depends(get_db)) -> FornecedorResponse:
+    try:
+        novo_fornecedor = Fornecedor(
+            nome=fornecedor.nome,
+            cnpj=fornecedor.cnpj,
+            endereco=fornecedor.endereco,
+            email=fornecedor.email,
+            telefone=fornecedor.telefone,
+            status_ativo=True
+        )
+        db.add(novo_fornecedor)
+        db.commit()
+        db.refresh(novo_fornecedor)
 
+        return FornecedorResponse(
+            id=novo_fornecedor.id,
+            nome=novo_fornecedor.nome,
+            endereco=novo_fornecedor.endereco,
+            email=novo_fornecedor.email,
+            telefone=novo_fornecedor.telefone,
+            cnpj=novo_fornecedor.cnpj,
+            status_ativo=novo_fornecedor.status_ativo
+        )
+    except Exception as e:
+        logger.error(f"Erro ao criar fornecedor: {e}")
+        raise HTTPException(status_code=500, detail="Erro interno do servidor.")
 
-
+@router.get("/listar-fornecedores", response_model=list[FornecedorResponse])
+def listar_fornecedores(db: Session = Depends(get_db)):
+    fornecedores = db.query(Fornecedor).all()
+    return fornecedores

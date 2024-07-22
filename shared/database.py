@@ -10,6 +10,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
+
 class Cliente(Base):
     __tablename__ = "clientes"
     id = Column(Integer, primary_key=True, autoincrement=True, index=True)
@@ -22,6 +23,7 @@ class Cliente(Base):
     data_registro = Column(DateTime)
 
     encomendas = relationship("Encomenda", back_populates="cliente")
+
 
 class Motorista(Base):
     __tablename__ = "motoristas"
@@ -37,6 +39,7 @@ class Motorista(Base):
     veiculos = relationship("Veiculo", back_populates="motorista")
     encomendas = relationship("Encomenda", back_populates="motorista")
 
+
 class Veiculo(Base):
     __tablename__ = "veiculos"
     id = Column(Integer, primary_key=True, autoincrement=True, index=True)
@@ -49,11 +52,13 @@ class Veiculo(Base):
     motorista = relationship("Motorista", back_populates="veiculos")
     encomendas = relationship("Encomenda", back_populates="veiculo")
 
+
 class Encomenda(Base):
     __tablename__ = 'encomendas'
 
     id = Column(Integer, primary_key=True, autoincrement=True, index=True)
     cliente_id = Column(Integer, ForeignKey('clientes.id'))
+    fornecedor_id = Column(Integer, ForeignKey('fornecedores.id'))
     quantidade = Column(Integer)
     descricao = Column(String)
     prazo_entrega = Column(DateTime)
@@ -65,3 +70,17 @@ class Encomenda(Base):
     cliente = relationship('Cliente', back_populates='encomendas')
     motorista = relationship('Motorista', back_populates='encomendas')
     veiculo = relationship('Veiculo', back_populates='encomendas')
+    fornecedor = relationship('Fornecedor', back_populates='encomendas')
+
+
+class Fornecedor(Base):
+    __tablename__ = "fornecedores"
+    id = Column(Integer, primary_key=True, autoincrement=True, index=True)
+    nome = Column(String)
+    endereco = Column(String)
+    telefone = Column(String)
+    email = Column(String)
+    status_ativo = Column(Boolean, default=True)
+    cnpj = Column(String, unique=True, index=True)
+
+    encomendas = relationship("Encomenda", back_populates="fornecedor")
