@@ -1,10 +1,12 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, conint
 from typing import Optional
 
 class VeiculoRequest(BaseModel):
     marca: str
     modelo: str
-    ano: int
+    placa: str
+    ano: conint(ge=1900, le=2024)
+    motorista_id: conint(ge=1)
     status_ativo: Optional[bool] = True
 
 

@@ -1,239 +1,233 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 
-from distribuidora.models.distribuidora_models import EncomendaRequest, EncomendaResponse, ClienteRequest, \
-    ClienteResponse, MotoristaRequest, MotoristaResponse, VeiculoRequest, VeiculoResponse
-from shared.database import Encomenda, Cliente, Motorista, Veiculo, Fornecedor
-from shared.dependencies import get_db
-import logging
-from shared.database import SessionLocal
+from distribuidora.models.distribuidora_models import *
 from distribuidora.models.fornecedor_models import FornecedorRequest, FornecedorResponse
-
-
-
+from shared.database import Encomenda, Cliente, Motorista, Veiculo, Fornecedor, Pagamento, Produto, Categoria
+from shared.dependencies import get_db
+from distribuidora.models.veiculo_models import VeiculoRequest, VeiculoResponse
+from typing import List
 
 router = APIRouter()
 tz_brasilia = timezone(timedelta(hours=-3))
-logger = logging.getLogger("uvicorn")
 
 
-def estimar_prazo_entrega(endereco: str) -> datetime:
-    localidades_1h = ["centro", "brotas", "costa azul", "caminho das arvores",
-                      "cidade alta", "pernambués", "boca do rio"]
-    localidades_40min = ["ondina", "federação", "barra", "pituba",
-                         "amaralina", "rio vermelho", "graça"]
+@router.post("/criar-clientes/", response_model=ClienteResponse)
+def create_cliente(cliente: ClienteRequest, db: Session = Depends(get_db)):
+    db_cliente = Cliente(
+        nome=cliente.nome,
+        idade=cliente.idade,
+        endereco=cliente.endereco,
+        telefone=cliente.telefone,
+        email=cliente.email,
+        status_atividade=True,
+        cpf=cliente.cpf,
+        data_registro=datetime.now(tz=tz_brasilia)
+    )
+    db.add(db_cliente)
+    db.commit()
+    db.refresh(db_cliente)
+    return db_cliente
 
-    if endereco.lower() in localidades_1h:
-        return datetime.now(tz=tz_brasilia) + timedelta(hours=1)
-    elif endereco.lower() in localidades_40min:
-        return datetime.now(tz=tz_brasilia) + timedelta(minutes=40)
-    else:
-        return datetime.now(tz=tz_brasilia) + timedelta(hours=2)
+@router.get("/listar-clientes/", response_model=List[ClienteResponse])
+def list_clientes(db: Session = Depends(get_db)):
+    clientes = db.query(Cliente).all()
+    return clientes
 
+@router.post("/criar-motoristas/", response_model=MotoristaResponse)
+def create_motorista(motorista: MotoristaRequest, db: Session = Depends(get_db)):
+    db_motorista = Motorista(
+        nome=motorista.nome,
+        idade=motorista.idade,
+        endereco=motorista.endereco,
+        telefone=motorista.telefone,
+        email=motorista.email,
+        status_ativo=True,
+        cpf=motorista.cpf
+    )
+    db.add(db_motorista)
+    db.commit()
+    db.refresh(db_motorista)
 
-@router.get("/encomendas", response_model=list[EncomendaResponse])
-def listar_encomendas(db: Session = Depends(get_db)):
-    encomendas = db.query(Encomenda).all()
-    return encomendas
+    return db_motorista
 
-
-@router.post("/conta-do-cliente", response_model=ClienteResponse, status_code=201)
-def criar_conta(conta: ClienteRequest, db: Session = Depends(get_db)) -> ClienteResponse:
-    try:
-        logger.debug(f"Tentando criar cliente: {conta}")
-
-        if db.query(Cliente).filter(Cliente.cpf == conta.cpf).first():
-            raise HTTPException(status_code=400, detail="CPF já cadastrado.")
-
-        novo_cliente = Cliente(
-            nome=conta.nome,
-            idade=conta.idade,
-            endereco=conta.endereco,
-            telefone=conta.telefone,
-            status_atividade=True,
-            cpf=conta.cpf,
-            data_registro=datetime.now(tz=tz_brasilia)
-        )
-        db.add(novo_cliente)
-        db.commit()
-        db.refresh(novo_cliente)
-        logger.debug(f"Cliente criado: {novo_cliente}")
-        return novo_cliente
-    except Exception as e:
-        logger.error(f"Erro ao criar cliente: {e}")
-        raise HTTPException(status_code=500, detail="Erro interno do servidor.")
-
-
-@router.post("/criar-encomenda", response_model=EncomendaResponse, status_code=201)
-def criar_encomenda(encomenda: EncomendaRequest, db: Session = Depends(get_db)) -> EncomendaResponse:
-    try:
-        logger.debug(f"Tentando criar encomenda: {encomenda}")
-
-        cliente = db.query(Cliente).filter(Cliente.nome == encomenda.cliente).first()
-        if not cliente:
-            raise HTTPException(status_code=404, detail="Cliente não encontrado.")
-
-        motorista = db.query(Motorista).filter(Motorista.status_ativo == True).first()
-        if not motorista:
-            raise HTTPException(status_code=404, detail="Nenhum motorista disponível.")
-
-        veiculo = db.query(Veiculo).filter(Veiculo.motorista_id == motorista.id, Veiculo.status_ativo == True).first()
-        if not veiculo:
-            raise HTTPException(status_code=404, detail="Nenhum veículo disponível para o motorista.")
-
-        prazo_entrega_estimado = estimar_prazo_entrega(cliente.endereco)
-        nova_encomenda = Encomenda(
-            cliente_id=cliente.id,
-            quantidade=encomenda.quantidade,
-            descricao=encomenda.descricao,
-            prazo_entrega=prazo_entrega_estimado,
-            data_pedido=datetime.now(tz=tz_brasilia),
-            status_encomenda=encomenda.status_encomenda,
-            motorista_id=motorista.id,
-            veiculo_id=veiculo.id
-        )
-        db.add(nova_encomenda)
-
-        motorista.status_ativo = False
-        veiculo.status_ativo = False
-
-        db.commit()
-        db.refresh(nova_encomenda)
-        logger.debug(f"Encomenda criada: {nova_encomenda}")
-
-        return EncomendaResponse(
-            id=nova_encomenda.id,
-            cliente_id=nova_encomenda.cliente_id,
-            quantidade=nova_encomenda.quantidade,
-            descricao=nova_encomenda.descricao,
-            prazo_entrega=nova_encomenda.prazo_entrega,
-            data_pedido=nova_encomenda.data_pedido,
-            status_encomenda=nova_encomenda.status_encomenda,
-            motorista_id=nova_encomenda.motorista_id,
-            veiculo_id=nova_encomenda.veiculo_id
-        )
-    except HTTPException as e:
-        logger.error(f"Erro HTTP ao criar encomenda: {e.detail}")
-        raise e
-
-    except Exception as e:
-        logger.error(f"Erro inesperado ao criar encomenda: {e}")
-        raise HTTPException(status_code=500, detail="Erro interno do servidor.")
-
-
-
-@router.get("/clientes/{cliente_id}/encomendas", response_model=list[EncomendaResponse])
-def listar_encomendas_cliente(cliente_id: int, db: Session = Depends(get_db)):
-    encomendas = db.query(Encomenda).filter(Encomenda.cliente_id == cliente_id).all()
-    if not encomendas:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado ou sem encomendas.")
-    return encomendas
-
-
-@router.post("/conta-do-motorista", response_model=MotoristaResponse, status_code=201)
-def criar_motorista(motorista: MotoristaRequest, db: Session = Depends(get_db)) -> MotoristaResponse:
-    try:
-        logger.debug(f"Tentando criar motorista: {motorista}")
-
-        novo_motorista = Motorista(
-            nome=motorista.nome,
-            idade=motorista.idade,
-            telefone=motorista.telefone,
-            endereco=motorista.endereco,
-            email=motorista.email,
-            status_ativo=True,
-            cpf=motorista.cpf
-        )
-        db.add(novo_motorista)
-        db.commit()
-        db.refresh(novo_motorista)
-
-        veiculo = Veiculo(
-            motorista_id=novo_motorista.id,
-            marca=motorista.veiculo.marca,
-            modelo=motorista.veiculo.modelo,
-            ano=motorista.veiculo.ano,
-            status_ativo=motorista.veiculo.status_ativo
-        )
-        db.add(veiculo)
-        db.commit()
-        db.refresh(veiculo)
-
-        logger.debug(f"Motorista e veículo criados: {novo_motorista}, {veiculo}")
-        return MotoristaResponse(
-            id=novo_motorista.id,
-            idade=novo_motorista.idade,
-            nome=novo_motorista.nome,
-            telefone=novo_motorista.telefone,
-            endereco=novo_motorista.endereco,
-            email=novo_motorista.email,
-            status_ativo=novo_motorista.status_ativo,
-            cpf=novo_motorista.cpf
-        )
-    except Exception as e:
-        logger.error(f"Erro ao criar motorista: {e}")
-        raise HTTPException(status_code=500, detail="Erro interno do servidor.")
-
-
-
-@router.get("/motoristas", response_model=list[MotoristaResponse])
-def listar_motoristas(db: Session = Depends(get_db)):
+@router.get("/listar-motoristas/", response_model=List[MotoristaResponse])
+def list_motoristas(db: Session = Depends(get_db)):
     motoristas = db.query(Motorista).all()
     return motoristas
 
+@router.post("/criar-encomendas/", response_model=EncomendaResponse)
+def create_encomenda(encomenda: EncomendaRequest, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.nome == encomenda.cliente).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
-@router.get("/veiculos", response_model=list[VeiculoResponse])
-def listar_veiculos(db: Session = Depends(get_db)):
-    veiculos = db.query(Veiculo).all()
-    return veiculos
+    produto_objs = []
+    for produto_id in encomenda.produtos:
+        produto = db.query(Produto).filter(Produto.id == produto_id).first()
+        if not produto:
+            raise HTTPException(status_code=404, detail=f"Produto com id {produto_id} não encontrado")
+        produto_objs.append(produto)
 
-def atualizar_status_encomendas():
+    veiculo_livre = db.query(Veiculo).filter(Veiculo.status_ativo == True).first()
+    if not veiculo_livre:
+        raise HTTPException(status_code=400, detail="Não há veículos disponíveis no momento")
 
+    veiculo_livre.status_ativo = False
+    db.commit()
 
-    try:
-        db = SessionLocal()
-        agora = datetime.now(timezone.utc)
-        encomendas = db.query(Encomenda).filter(Encomenda.prazo_entrega < agora,
-                                                Encomenda.status_encomenda == True).all()
-        for encomenda in encomendas:
-            encomenda.status_encomenda = False
-        db.commit()
-    except Exception as e:
-        print(f"Erro ao atualizar status das encomendas: {e}")
-    finally:
-        db.close()
+    motorista = db.query(Motorista).filter(Motorista.id == veiculo_livre.motorista_id).first()
+    if not motorista:
+        raise HTTPException(status_code=400, detail="Motorista não encontrado para o veículo selecionado")
 
-@router.post("/criar-fornecedor", response_model=FornecedorResponse)
-def criar_fornecedor(fornecedor: FornecedorRequest, db: Session = Depends(get_db)) -> FornecedorResponse:
-    try:
-        novo_fornecedor = Fornecedor(
-            nome=fornecedor.nome,
-            cnpj=fornecedor.cnpj,
-            endereco=fornecedor.endereco,
-            email=fornecedor.email,
-            telefone=fornecedor.telefone,
-            status_ativo=True
-        )
-        db.add(novo_fornecedor)
-        db.commit()
-        db.refresh(novo_fornecedor)
+    # Definindo prazo de entrega como uma semana a partir da data do pedido
+    prazo_entrega = datetime.now(tz=tz_brasilia) + timedelta(weeks=1)
 
-        return FornecedorResponse(
-            id=novo_fornecedor.id,
-            nome=novo_fornecedor.nome,
-            endereco=novo_fornecedor.endereco,
-            email=novo_fornecedor.email,
-            telefone=novo_fornecedor.telefone,
-            cnpj=novo_fornecedor.cnpj,
-            status_ativo=novo_fornecedor.status_ativo
-        )
-    except Exception as e:
-        logger.error(f"Erro ao criar fornecedor: {e}")
-        raise HTTPException(status_code=500, detail="Erro interno do servidor.")
+    db_encomenda = Encomenda(
+        cliente_id=cliente.id,
+        quantidade=encomenda.quantidade,
+        descricao=encomenda.descricao,
+        data_pedido=datetime.now(tz=tz_brasilia),
+        prazo_entrega=prazo_entrega,  # Adicionando prazo de entrega
+        status_encomenda=encomenda.status_encomenda,
+        motorista_id=motorista.id,
+        veiculo_id=veiculo_livre.id,
+        produtos=produto_objs
+    )
+    db.add(db_encomenda)
+    db.commit()
+    db.refresh(db_encomenda)
+    return db_encomenda
 
-@router.get("/listar-fornecedores", response_model=list[FornecedorResponse])
-def listar_fornecedores(db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.nome == encomenda.cliente).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    produto_objs = []
+    for produto_id in encomenda.produtos:
+        produto = db.query(Produto).filter(Produto.id == produto_id).first()
+        if not produto:
+            raise HTTPException(status_code=404, detail=f"Produto com id {produto_id} não encontrado")
+        produto_objs.append(produto)
+
+    veiculo_livre = db.query(Veiculo).filter(Veiculo.status_ativo == True).first()
+    if not veiculo_livre:
+        raise HTTPException(status_code=400, detail="Não há veículos disponíveis no momento")
+
+    veiculo_livre.status_ativo = False
+    db.commit()
+
+    motorista = db.query(Motorista).filter(Motorista.id == veiculo_livre.motorista_id).first()
+    if not motorista:
+        raise HTTPException(status_code=400, detail="Motorista não encontrado para o veículo selecionado")
+
+    db_encomenda = Encomenda(
+        cliente_id=cliente.id,
+        quantidade=encomenda.quantidade,
+        descricao=encomenda.descricao,
+        data_pedido=datetime.now(tz=tz_brasilia),
+        status_encomenda=encomenda.status_encomenda,
+        motorista_id=motorista.id,
+        veiculo_id=veiculo_livre.id,
+        produtos=produto_objs
+    )
+    db.add(db_encomenda)
+    db.commit()
+    db.refresh(db_encomenda)
+    return db_encomenda
+@router.get("/listar-encomendas-do-cliente/", response_model=List[EncomendaResponse])
+def list_encomendas_by_cliente_email(email: str, db: Session = Depends(get_db)):
+    cliente = db.query(Cliente).filter(Cliente.email == email).first()
+    if not cliente:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    encomendas = db.query(Encomenda).filter(Encomenda.cliente_id == cliente.id).all()
+    return encomendas
+
+@router.post("/criar-fornecedores/", response_model=FornecedorResponse)
+def create_fornecedor(fornecedor: FornecedorRequest, db: Session = Depends(get_db)):
+    db_fornecedor = Fornecedor(
+        nome=fornecedor.nome,
+        endereco=fornecedor.endereco,
+        telefone=fornecedor.telefone,
+        email=fornecedor.email,
+        status_ativo=True,
+        cnpj=fornecedor.cnpj
+    )
+    db.add(db_fornecedor)
+    db.commit()
+    db.refresh(db_fornecedor)
+    return db_fornecedor
+
+@router.get("/listar-fornecedores/", response_model=List[FornecedorResponse])
+def list_fornecedores(db: Session = Depends(get_db)):
     fornecedores = db.query(Fornecedor).all()
     return fornecedores
+
+@router.post("/criar-pagamentos/", response_model=PagamentoResponse)
+def create_pagamento(pagamento: PagamentoRequest, db: Session = Depends(get_db)):
+    db_pagamento = Pagamento(
+        encomenda_id=pagamento.encomenda_id,
+        valor=pagamento.valor,
+        metodo_pagamento=pagamento.metodo_pagamento,
+        data_pagamento=datetime.now(tz=tz_brasilia)
+    )
+    db.add(db_pagamento)
+    db.commit()
+    db.refresh(db_pagamento)
+    return db_pagamento
+
+
+@router.post("/criar-produtos/", response_model=ProdutoResponse)
+def create_produto(produto: ProdutoRequest, db: Session = Depends(get_db)):
+    db_produto = Produto(
+        nome=produto.nome,
+        descricao=produto.descricao,
+        preco=produto.preco,
+        categoria_id=produto.categoria_id,
+        fornecedor_id=produto.fornecedor_id,
+        data_criacao=datetime.now(tz=tz_brasilia)
+    )
+    db.add(db_produto)
+    db.commit()
+    db.refresh(db_produto)
+    return db_produto
+
+@router.get("/listar-produtos/", response_model=List[ProdutoResponse])
+def list_produtos(db: Session = Depends(get_db)):
+    produtos = db.query(Produto).all()
+    return produtos
+
+@router.post("/criar-categorias/", response_model=CategoriaResponse)
+def create_categoria(categoria: CategoriaRequest, db: Session = Depends(get_db)):
+    db_categoria = Categoria(
+        nome=categoria.nome,
+        descricao=categoria.descricao,
+        data_criacao=datetime.now(tz=tz_brasilia)
+    )
+    db.add(db_categoria)
+    db.commit()
+    db.refresh(db_categoria)
+    return db_categoria
+
+@router.post("/criar-veiculos/", response_model=VeiculoResponse)
+def create_veiculo(veiculo: VeiculoRequest, db: Session = Depends(get_db)):
+    db_veiculo = Veiculo(
+        marca=veiculo.marca,
+        placa=veiculo.placa,
+        modelo=veiculo.modelo,
+        ano=veiculo.ano,
+        status_ativo=veiculo.status_ativo,
+        motorista_id=veiculo.motorista_id
+    )
+    db.add(db_veiculo)
+    db.commit()
+    db.refresh(db_veiculo)
+    return db_veiculo
+
+@router.get("/listar-veiculos/", response_model=List[VeiculoResponse])
+def list_veiculos(db: Session = Depends(get_db)):
+    veiculos = db.query(Veiculo).all()
+    return veiculos
